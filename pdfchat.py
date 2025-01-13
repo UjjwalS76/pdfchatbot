@@ -1,8 +1,8 @@
 """
-PDF Chat Application
--------------------
-A Streamlit application that enables conversational interaction with PDF documents
-using Google's Generative AI with configurable models for different use cases.
+PDF Chat Application with Document Type Specialization
+---------------------------------------------------
+A Streamlit application that adapts its processing and interaction based on
+document types and usage contexts.
 """
 
 import streamlit as st
@@ -17,67 +17,155 @@ from langchain.prompts import PromptTemplate
 import os
 from dotenv import load_dotenv
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
 
 # Load environment variables
 load_dotenv()
 
-class InteractionMode(Enum):
-    """Defines different modes of interaction with the documents"""
-    STRICT = "Strict (Factual Responses)"
-    CREATIVE = "Creative (Elaborate Explanations)"
-    ANALYSIS = "Analysis (Insights & Patterns)"
+class DocumentType(Enum):
+    """Different types of documents with specific handling requirements"""
+    TECHNICAL = "Technical Documentation"
+    ACADEMIC = "Academic Papers"
+    LEGAL = "Legal Documents"
+    BUSINESS = "Business Reports"
+    GENERAL = "General Content"
 
-# Model configuration for different interaction modes
-MODEL_CONFIGS: Dict[InteractionMode, Dict[str, Any]] = {
-    InteractionMode.STRICT: {
-        "temperature": 0.1,
-        "prompt_template": """You are a precise and accurate AI assistant focused on providing factual information from the documents.
-        Use the following context to answer the question. Stick strictly to the information provided.
-        If the answer isn't directly supported by the context, say so clearly.
-        
-        {context}
-        
-        Question: {question}
-        Factual Answer:"""
+class UsageContext(Enum):
+    """Different usage contexts that affect processing and interaction"""
+    RESEARCH = "Research Analysis"
+    SUMMARY = "Quick Summary"
+    QA = "Question Answering"
+    ANALYSIS = "Deep Analysis"
+
+@dataclass
+class DocumentConfig:
+    """Configuration for document processing based on type"""
+    chunk_size: int
+    chunk_overlap: int
+    temperature: float
+    prompt_template: str
+    model_name: str = "gemini-pro"  # Default model, can be overridden
+    
+# Configurations for different document types
+DOCUMENT_CONFIGS: Dict[DocumentType, Dict[UsageContext, DocumentConfig]] = {
+    DocumentType.TECHNICAL: {
+        UsageContext.RESEARCH: DocumentConfig(
+            chunk_size=1500,
+            chunk_overlap=300,
+            temperature=0.1,
+            prompt_template="""You are a technical documentation expert. Analyze the following technical content 
+            with precise attention to detail. Maintain technical accuracy and use proper terminology.
+            {context}
+            Question: {question}
+            Technical Response:"""
+        ),
+        UsageContext.SUMMARY: DocumentConfig(
+            chunk_size=2000,
+            chunk_overlap=200,
+            temperature=0.2,
+            prompt_template="""Summarize this technical documentation clearly and concisely. 
+            Focus on key technical concepts and implementation details.
+            {context}
+            Question: {question}
+            Technical Summary:"""
+        )
     },
-    InteractionMode.CREATIVE: {
-        "temperature": 0.7,
-        "prompt_template": """You are a helpful AI tutor that explains concepts from documents in an engaging and detailed way.
-        Use the following context as your source material, but feel free to elaborate with examples and explanations.
-        
-        {context}
-        
-        Question: {question}
-        Detailed Explanation:"""
+    DocumentType.ACADEMIC: {
+        UsageContext.RESEARCH: DocumentConfig(
+            chunk_size=1000,
+            chunk_overlap=200,
+            temperature=0.1,
+            prompt_template="""You are a research paper analyst. Examine the academic content thoroughly,
+            maintaining academic rigor and precision in your analysis.
+            {context}
+            Question: {question}
+            Academic Analysis:"""
+        ),
+        UsageContext.QA: DocumentConfig(
+            chunk_size=800,
+            chunk_overlap=150,
+            temperature=0.1,
+            prompt_template="""Provide precise answers based on the academic paper content.
+            Cite specific sections when relevant.
+            {context}
+            Question: {question}
+            Academic Response:"""
+        )
     },
-    InteractionMode.ANALYSIS: {
-        "temperature": 0.3,
-        "prompt_template": """You are an analytical AI assistant that identifies patterns and insights from documents.
-        Analyze the following context to provide thoughtful insights and connections.
-        Support your analysis with specific references from the text.
-        
-        {context}
-        
-        Question: {question}
-        Analysis:"""
+    DocumentType.LEGAL: {
+        UsageContext.ANALYSIS: DocumentConfig(
+            chunk_size=1200,
+            chunk_overlap=300,
+            temperature=0.1,
+            prompt_template="""Analyze this legal document with attention to legal terminology and implications.
+            Maintain precise legal language and context.
+            {context}
+            Question: {question}
+            Legal Analysis:"""
+        ),
+        UsageContext.SUMMARY: DocumentConfig(
+            chunk_size=1500,
+            chunk_overlap=200,
+            temperature=0.2,
+            prompt_template="""Provide a clear summary of this legal document, highlighting key points
+            while maintaining legal accuracy.
+            {context}
+            Question: {question}
+            Legal Summary:"""
+        )
+    },
+    DocumentType.BUSINESS: {
+        UsageContext.ANALYSIS: DocumentConfig(
+            chunk_size=1000,
+            chunk_overlap=200,
+            temperature=0.2,
+            prompt_template="""Analyze this business document focusing on key business insights,
+            metrics, and strategic implications.
+            {context}
+            Question: {question}
+            Business Analysis:"""
+        ),
+        UsageContext.SUMMARY: DocumentConfig(
+            chunk_size=1200,
+            chunk_overlap=150,
+            temperature=0.3,
+            prompt_template="""Summarize this business document focusing on key findings,
+            recommendations, and business impact.
+            {context}
+            Question: {question}
+            Business Summary:"""
+        )
+    },
+    DocumentType.GENERAL: {
+        UsageContext.QA: DocumentConfig(
+            chunk_size=1000,
+            chunk_overlap=200,
+            temperature=0.2,
+            prompt_template="""Provide clear and helpful answers based on the document content.
+            {context}
+            Question: {question}
+            Response:"""
+        ),
+        UsageContext.SUMMARY: DocumentConfig(
+            chunk_size=1500,
+            chunk_overlap=200,
+            temperature=0.3,
+            prompt_template="""Provide a clear and concise summary of the content.
+            {context}
+            Question: {question}
+            Summary:"""
+        )
     }
 }
 
 # Initialize Streamlit page configuration
 st.set_page_config(
-    page_title="Chat with PDF",
+    page_title="Smart PDF Chat",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Application title and description
-st.title("Chat with your PDF 📚")
-st.markdown("""
-Upload PDF documents and interact with their content using natural language.
-Choose different interaction modes to get responses tailored to your needs.
-""")
 
 # Initialize session state
 if "conversation" not in st.session_state:
@@ -86,8 +174,10 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "processComplete" not in st.session_state:
     st.session_state.processComplete = None
-if "interaction_mode" not in st.session_state:
-    st.session_state.interaction_mode = InteractionMode.STRICT
+if "doc_type" not in st.session_state:
+    st.session_state.doc_type = DocumentType.GENERAL
+if "usage_context" not in st.session_state:
+    st.session_state.usage_context = UsageContext.QA
 
 def get_pdf_text(pdf_docs):
     """Extract text from uploaded PDF documents"""
@@ -98,36 +188,39 @@ def get_pdf_text(pdf_docs):
             text += page.extract_text()
     return text
 
-def get_text_chunks(text):
-    """Split the text into smaller chunks for processing"""
+def get_text_chunks(text: str, config: DocumentConfig) -> list:
+    """
+    Split text into chunks based on document configuration
+    
+    Args:
+        text: Raw text to split
+        config: DocumentConfig containing chunk settings
+    """
     text_splitter = CharacterTextSplitter(
         separator="\n",
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=config.chunk_size,
+        chunk_overlap=config.chunk_overlap,
         length_function=len
     )
-    chunks = text_splitter.split_text(text)
-    return chunks
+    return text_splitter.split_text(text)
 
-def get_conversation_chain(vectorstore, mode: InteractionMode):
+def get_conversation_chain(vectorstore, config: DocumentConfig):
     """
-    Create a conversation chain using Google's Generative AI
+    Create a conversation chain using configuration-specific settings
     
     Args:
         vectorstore: FAISS vector store containing document embeddings
-        mode: InteractionMode determining the conversation behavior
+        config: DocumentConfig containing model settings
     """
-    config = MODEL_CONFIGS[mode]
-    
     llm = ChatGoogleGenerativeAI(
-        model="gemini-pro",
-        temperature=config["temperature"],
+        model=config.model_name,
+        temperature=config.temperature,
         convert_system_message_to_human=True
     )
     
     prompt = PromptTemplate(
         input_variables=['context', 'question'],
-        template=config["prompt_template"]
+        template=config.prompt_template
     )
     
     memory = ConversationBufferMemory(
@@ -135,22 +228,30 @@ def get_conversation_chain(vectorstore, mode: InteractionMode):
         return_messages=True
     )
     
-    conversation_chain = ConversationalRetrievalChain.from_llm(
+    return ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=vectorstore.as_retriever(),
         memory=memory,
         combine_docs_chain_kwargs={'prompt': prompt}
     )
-    return conversation_chain
 
-def process_docs(pdf_docs):
-    """Process uploaded PDF documents and initialize the conversation chain"""
+def process_docs(pdf_docs, doc_type: DocumentType, usage_context: UsageContext):
+    """
+    Process documents using type-specific configurations
+    
+    Args:
+        pdf_docs: List of uploaded PDF files
+        doc_type: Type of document being processed
+        usage_context: Context in which the document will be used
+    """
     try:
+        config = DOCUMENT_CONFIGS[doc_type][usage_context]
+        
         with st.spinner("Extracting text from PDFs..."):
             raw_text = get_pdf_text(pdf_docs)
             
-        with st.spinner("Chunking text..."):
-            text_chunks = get_text_chunks(raw_text)
+        with st.spinner(f"Chunking text (size: {config.chunk_size}, overlap: {config.chunk_overlap})..."):
+            text_chunks = get_text_chunks(raw_text, config)
             
         with st.spinner("Creating embeddings..."):
             embeddings = GoogleGenerativeAIEmbeddings(
@@ -158,12 +259,9 @@ def process_docs(pdf_docs):
             )
             vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
             
-        with st.spinner("Setting up chat interface..."):
-            st.session_state.vectorstore = vectorstore  # Store for mode switching
-            st.session_state.conversation = get_conversation_chain(
-                vectorstore,
-                st.session_state.interaction_mode
-            )
+        with st.spinner("Setting up specialized chat interface..."):
+            st.session_state.vectorstore = vectorstore
+            st.session_state.conversation = get_conversation_chain(vectorstore, config)
             st.session_state.processComplete = True
             
         return True
@@ -171,63 +269,79 @@ def process_docs(pdf_docs):
         st.error(f"An error occurred during processing: {str(e)}")
         return False
 
+# Application title and description
+st.title("Smart PDF Chat 📚")
+st.markdown("""
+This advanced PDF chat system adapts to your document type and usage needs.
+Select the appropriate document type and usage context for optimal results.
+""")
+
 # Sidebar configuration
 with st.sidebar:
-    st.subheader("Document Upload")
+    st.subheader("Document Configuration")
+    
+    # Document upload
     pdf_docs = st.file_uploader(
         "Upload your PDFs here",
         type="pdf",
         accept_multiple_files=True,
-        help="You can upload multiple PDF files"
+        help="Upload one or more PDF documents"
     )
     
-    st.subheader("Interaction Settings")
-    selected_mode = st.selectbox(
-        "Choose interaction mode",
-        options=[mode.value for mode in InteractionMode],
-        help="""
-        Strict: Direct, factual answers from the documents
-        Creative: Detailed explanations with examples
-        Analysis: Focus on patterns and insights
-        """
+    # Document type selection
+    selected_doc_type = st.selectbox(
+        "Document Type",
+        options=[dt.value for dt in DocumentType],
+        help="Select the type of document you're uploading"
     )
     
-    # Update conversation chain if mode changes
-    new_mode = InteractionMode(selected_mode)
-    if st.session_state.get("interaction_mode") != new_mode:
-        st.session_state.interaction_mode = new_mode
-        if st.session_state.get("vectorstore"):
-            st.session_state.conversation = get_conversation_chain(
-                st.session_state.vectorstore,
-                new_mode
-            )
+    # Get available usage contexts for selected document type
+    doc_type = DocumentType(selected_doc_type)
+    available_contexts = [
+        context.value for context in UsageContext
+        if context in DOCUMENT_CONFIGS[doc_type]
+    ]
     
+    # Usage context selection
+    selected_context = st.selectbox(
+        "Usage Context",
+        options=available_contexts,
+        help="Select how you plan to use this document"
+    )
+    
+    # Update session state
+    new_doc_type = DocumentType(selected_doc_type)
+    new_context = UsageContext(selected_context)
+    
+    # Process button
     if st.button("Process Documents", disabled=not pdf_docs):
-        success = process_docs(pdf_docs)
+        success = process_docs(pdf_docs, new_doc_type, new_context)
         if success:
-            st.success("Processing complete! You can now ask questions about your documents.")
+            st.success("Processing complete! Documents configured for " +
+                      f"{selected_doc_type} with {selected_context} context.")
 
 # Main chat interface
 if st.session_state.processComplete:
-    # Display current mode
-    st.info(f"Current mode: {st.session_state.interaction_mode.value}")
+    # Display current configuration
+    st.info(f"Document Type: {st.session_state.doc_type.value} | " +
+            f"Usage Context: {st.session_state.usage_context.value}")
     
-    user_question = st.chat_input("Ask a question about your documents:")
+    user_question = st.chat_input("Ask about your documents:")
     
     if user_question:
         try:
-            with st.spinner("Thinking..."):
+            with st.spinner("Processing your question..."):
                 response = st.session_state.conversation({
                     "question": user_question
                 })
                 st.session_state.chat_history.append(("You", user_question))
                 st.session_state.chat_history.append(("Bot", response["answer"]))
         except Exception as e:
-            st.error(f"An error occurred during chat: {str(e)}")
+            st.error(f"An error occurred: {str(e)}")
 
     # Display chat history
     for role, message in st.session_state.chat_history:
         with st.chat_message(role):
             st.write(message)
 else:
-    st.info("👈 Upload your PDFs in the sidebar and click 'Process Documents' to get started!")
+    st.info("👈 Start by uploading your documents and selecting appropriate settings in the sidebar.")
