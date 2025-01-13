@@ -1,22 +1,22 @@
 import streamlit as st
 from PyPDF2 import PdfReader
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 import os
 
-# Set OpenAI API key from secrets
-os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+# Set Google API key from secrets
+os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
 
 # Page configuration
 st.set_page_config(page_title="Chat with PDF", page_icon="📚")
 st.title("Chat with your PDF 📚")
 
-# Initialize session state variables
+# Initialize session state variables for maintaining conversation state
 if "conversation" not in st.session_state:
     st.session_state.conversation = None
 if "chat_history" not in st.session_state:
@@ -25,6 +25,13 @@ if "processComplete" not in st.session_state:
     st.session_state.processComplete = None
 
 def get_pdf_text(pdf_docs):
+    """
+    Extract text from uploaded PDF documents
+    Args:
+        pdf_docs: List of uploaded PDF files
+    Returns:
+        str: Concatenated text from all PDFs
+    """
     text = ""
     for pdf in pdf_docs:
         pdf_reader = PdfReader(pdf)
@@ -33,6 +40,13 @@ def get_pdf_text(pdf_docs):
     return text
 
 def get_text_chunks(text):
+    """
+    Split the text into smaller chunks for processing
+    Args:
+        text: Raw text to be split
+    Returns:
+        list: List of text chunks
+    """
     text_splitter = CharacterTextSplitter(
         separator="\n",
         chunk_size=1000,
@@ -43,8 +57,21 @@ def get_text_chunks(text):
     return chunks
 
 def get_conversation_chain(vectorstore):
-    llm = ChatOpenAI(temperature=0.7, model_name='gpt-4o')
+    """
+    Create a conversation chain using Google's Generative AI
+    Args:
+        vectorstore: FAISS vector store containing document embeddings
+    Returns:
+        ConversationalRetrievalChain: Chain for managing conversation
+    """
+    # Initialize Google's Generative AI model
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-pro",
+        temperature=0.7,
+        convert_system_message_to_human=True
+    )
     
+    # Define the conversation template
     template = """You are a helpful AI assistant that helps users understand their PDF documents.
     Use the following pieces of context to answer the question at the end.
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
@@ -56,11 +83,13 @@ def get_conversation_chain(vectorstore):
 
     prompt = PromptTemplate(input_variables=['context', 'question'], template=template)
     
+    # Initialize conversation memory
     memory = ConversationBufferMemory(
         memory_key='chat_history',
         return_messages=True
     )
     
+    # Create and return the conversation chain
     conversation_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=vectorstore.as_retriever(),
@@ -70,20 +99,29 @@ def get_conversation_chain(vectorstore):
     return conversation_chain
 
 def process_docs(pdf_docs):
+    """
+    Process uploaded PDF documents
+    Args:
+        pdf_docs: List of uploaded PDF files
+    Returns:
+        bool: True if processing successful, False otherwise
+    """
     try:
-        # Get PDF text
+        # Extract text from PDFs
         raw_text = get_pdf_text(pdf_docs)
         
-        # Get text chunks
+        # Split text into chunks
         text_chunks = get_text_chunks(raw_text)
         
-        # Create embeddings
-        embeddings = OpenAIEmbeddings()
+        # Initialize Google's embedding model
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001"
+        )
         
         # Create vector store using FAISS
         vectorstore = FAISS.from_texts(texts=text_chunks, embedding=embeddings)
         
-        # Create conversation chain
+        # Initialize conversation chain
         st.session_state.conversation = get_conversation_chain(vectorstore)
         
         st.session_state.processComplete = True
